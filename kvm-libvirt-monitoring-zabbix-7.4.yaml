@@ -1,344 +1,399 @@
----
+# Zabbix 7.4 KVM template - corrected UUIDv4 identifiers
+# Import with Delete missing OFF. Existing template UUID may differ; export it for exact in-place upgrade.
 zabbix_export:
   version: '7.4'
   template_groups:
-  - uuid: e344c064fadc414db1b96b793d26a9e2
+  - uuid: 252bf49ad6cb437c9cd224d3d0532ece
     name: Templates/Virtualization
   templates:
-  - uuid: 286a89b7448d4f459ef4c11a616b44c2
+  - uuid: 770645c8acaa4aac82491bd216ffc2e5
     template: KVM Libvirt Monitoring
     name: KVM Libvirt Monitoring
+    description: KVM/libvirt VM metrics from kvm.raw JSON collected by existing Zabbix Agent 2 on RHEL/Rocky/AlmaLinux.
+      CPU core utilization and normalized vCPU utilization are distinct. Does not require guest agents. VM shutdown
+      alerts are not enabled because intentionally powered-off guests are common. Existing collector must supply
+      all expected fields.
     groups:
     - name: Templates/Virtualization
-    description: Monitors libvirt domains through the existing Zabbix Agent 2 kvm.raw UserParameter.
     items:
-    - uuid: 831a647aa62d4026ac5122b37b90fce8
-      name: 'KVM collector: Raw JSON'
+    - uuid: 6fccc00c31dd4e4b8458babf6b7d9e17
+      name: 'KVM: VM statistics (raw JSON)'
       type: ZABBIX_PASSIVE
       key: kvm.raw
       delay: 1m
       history: 1d
-      trends: '0'
       value_type: TEXT
-    - uuid: 19dd0a538a414861ae3d30b3083d925e
-      name: 'KVM collector: Timestamp'
-      type: DEPENDENT
-      key: kvm.collector.timestamp
-      delay: '0'
-      history: 30d
-      trends: '0'
-      units: unixtime
+      description: JSON snapshot from the existing Zabbix agent UserParameter and libvirt systemd collector. Agent
+        must return the timestamp, vm_count, running_count and vms array.
       preprocessing:
-      - type: JSONPATH
-        parameters:
-        - "$.timestamp"
-      master_item:
-        key: kvm.raw
-      triggers:
-      - uuid: 01605c608a7845fa84294c0a930096f3
-        name: KVM collector data is stale or missing
-        expression: nodata(/KVM Libvirt Monitoring/kvm.collector.timestamp,{$KVM.COLLECTOR.MAX.AGE})=1 or abs(last(/KVM Libvirt Monitoring/kvm.collector.timestamp)-now())>{$KVM.COLLECTOR.MAX.AGE}
-        priority: WARNING
-        description: Checks collector time against Zabbix time and detects missing parsed timestamps.
-    - uuid: a62a56735190403786bf82d349a5b3c8
-      name: 'KVM: Total VMs'
+      - type: DISCARD_UNCHANGED
+      tags:
+      - tag: component
+        value: raw
+    - uuid: e6ee652619954114aa74dc78b6c7f86b
+      name: 'KVM: Defined VMs'
       type: DEPENDENT
       key: kvm.vm.count
-      delay: '0'
-      history: 30d
-      trends: 365d
+      value_type: UNSIGNED
+      history: 7d
+      trends: 90d
       preprocessing:
       - type: JSONPATH
         parameters:
-        - "$.vm_count"
+        - $.vm_count
       master_item:
         key: kvm.raw
-    - uuid: 432b6105d3a54ac88e3c4c47e98b7328
+      tags:
+      - tag: component
+        value: hypervisor
+    - uuid: 9570038fa7994d6fa3e1da70a5b0845e
       name: 'KVM: Running VMs'
       type: DEPENDENT
-      key: kvm.vm.running.count
-      delay: '0'
-      history: 30d
-      trends: 365d
+      key: kvm.vm.running
+      value_type: UNSIGNED
+      history: 7d
+      trends: 90d
       preprocessing:
       - type: JSONPATH
         parameters:
-        - "$.running_count"
+        - $.running_count
       master_item:
         key: kvm.raw
-    discovery_rules:
-    - uuid: df3503f52a724d2d977e25ad381ac0c3
-      name: KVM VM discovery
+      tags:
+      - tag: component
+        value: hypervisor
+    - uuid: 2a79f71c626240bf8fba831f8d8dcde6
+      name: 'KVM: Collector snapshot timestamp'
       type: DEPENDENT
-      key: kvm.vm.discovery
-      delay: '0'
+      key: kvm.snapshot.ts
+      value_type: UNSIGNED
+      history: 7d
+      trends: 90d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.timestamp
+      master_item:
+        key: kvm.raw
+      tags:
+      - tag: component
+        value: hypervisor
+      units: unixtime
+      triggers:
+      - uuid: 871d41fde103496a855f2282549efde4
+        expression: fuzzytime(/KVM Libvirt Monitoring/kvm.snapshot.ts,180)=0
+        name: 'KVM: Collector snapshot is stale (>3 minutes)'
+        priority: WARNING
+        description: Collector timestamp has not advanced. Check zabbix-kvm-collector.timer/service, file access,
+          and Zabbix agent. Requires synchronized clocks.
+    discovery_rules:
+    - uuid: cc8b3ec504ca48c6be866a9f3a23f217
+      name: 'KVM: Virtual machine discovery'
+      type: DEPENDENT
+      key: kvm.discovery
       master_item:
         key: kvm.raw
       preprocessing:
       - type: JSONPATH
         parameters:
-        - "$.vms"
+        - $.vms
       lld_macro_paths:
-      - lld_macro: "{#VM.UUID}"
-        path: "$.uuid"
-      - lld_macro: "{#VM.NAME}"
-        path: "$.name"
+      - lld_macro: '{#VMUUID}'
+        path: $.uuid
+      - lld_macro: '{#VMNAME}'
+        path: $.name
       item_prototypes:
-      - uuid: ef92625cbf13422fa1d965c64466a1f3
-        name: "{#VM.NAME}: State"
+      - uuid: 7101ff6286ab4343a5f22fdae22d24e8
+        name: '{#VMNAME}: Power state'
         type: DEPENDENT
-        key: kvm.vm.state[{#VM.UUID}]
-        delay: '0'
-        history: 30d
-        trends: 365d
-        valuemap:
-          name: Libvirt domain state
+        key: kvm.vm.state[{#VMUUID}]
+        value_type: UNSIGNED
+        history: 7d
+        trends: 90d
         preprocessing:
         - type: JSONPATH
           parameters:
-          - $.vms[?(@.uuid == "{#VM.UUID}")].state.first()
-          error_handler: DISCARD_VALUE
+          - $.vms[?(@.uuid=="{#VMUUID}")].state.first()
         master_item:
           key: kvm.raw
-      - uuid: b33b7863b05949b7aea53a48dc9954bf
-        name: "{#VM.NAME}: vCPUs"
+        description: libvirt domain state (1 running, 3 paused, 5 shut off).
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
+      - uuid: b5de8032a6f84420844ef3c9b761f179
+        name: '{#VMNAME}: Allocated vCPUs'
         type: DEPENDENT
-        key: kvm.vm.vcpus[{#VM.UUID}]
-        delay: '0'
-        history: 30d
-        trends: 365d
+        key: kvm.vm.vcpus[{#VMUUID}]
+        value_type: UNSIGNED
+        history: 7d
+        trends: 90d
         preprocessing:
         - type: JSONPATH
           parameters:
-          - $.vms[?(@.uuid == "{#VM.UUID}")].vcpus.first()
-          error_handler: DISCARD_VALUE
+          - $.vms[?(@.uuid=="{#VMUUID}")].vcpus.first()
         master_item:
           key: kvm.raw
-      - uuid: a68dbcbfb98643239cd19c6134100a17
-        name: "{#VM.NAME}: CPU utilization (100% per core)"
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
+      - uuid: 3bdbda336a854211955f6d5094510f06
+        name: '{#VMNAME}: CPU utilization (100% per core)'
         type: DEPENDENT
-        key: kvm.vm.cpu.util[{#VM.UUID}]
-        delay: '0'
-        history: 30d
-        trends: 365d
-        units: "%"
+        key: kvm.vm.cpu[{#VMUUID}]
         value_type: FLOAT
-        description: Aggregate CPU usage across vCPUs. 100% equals one fully utilized logical CPU.
+        history: 7d
+        trends: 90d
         preprocessing:
         - type: JSONPATH
           parameters:
-          - $.vms[?(@.uuid == "{#VM.UUID}")].cpu_time_ms.first()
-          error_handler: DISCARD_VALUE
+          - $.vms[?(@.uuid=="{#VMUUID}")].cpu_time_ms.first()
         - type: CHANGE_PER_SECOND
+        - type: IN_RANGE
+          parameters:
+          - '0'
+          - '1000000000000'
+          error_handler: DISCARD_VALUE
         - type: MULTIPLIER
           parameters:
           - '0.1'
         master_item:
           key: kvm.raw
-      - uuid: 44859d4c8a5a446abb22bc77f98e0f2c
-        name: "{#VM.NAME}: Allocated memory"
-        type: DEPENDENT
-        key: kvm.vm.memory.allocated[{#VM.UUID}]
-        delay: '0'
-        history: 30d
-        trends: 365d
-        units: B
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.vms[?(@.uuid == "{#VM.UUID}")].mem_alloc_bytes.first()
-          error_handler: DISCARD_VALUE
-        master_item:
-          key: kvm.raw
-      - uuid: 6e8b89741c954ea1b19ea20eb3e8257b
-        name: "{#VM.NAME}: Host resident memory"
-        type: DEPENDENT
-        key: kvm.vm.memory.rss[{#VM.UUID}]
-        delay: '0'
-        history: 30d
-        trends: 365d
-        units: B
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.vms[?(@.uuid == "{#VM.UUID}")].mem_rss_bytes.first()
-          error_handler: DISCARD_VALUE
-        master_item:
-          key: kvm.raw
-      - uuid: 1133f194814a4157a56e5193dd1085b0
-        name: "{#VM.NAME}: Guest memory utilization"
-        type: DEPENDENT
-        key: kvm.vm.memory.guest.util[{#VM.UUID}]
-        delay: '0'
-        history: 30d
-        trends: 365d
-        units: "%"
+        units: '%'
+        description: CPU time rate relative to one physical CPU core. Can exceed 100% on multi-vCPU guests.
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
+      - uuid: d76fd553396e4446a863e616740cc1e3
+        name: '{#VMNAME}: CPU utilization (% of allocated vCPUs)'
+        type: CALCULATED
+        key: kvm.vm.cpu.normalized[{#VMUUID}]
         value_type: FLOAT
-        description: Populated only when the collector reports guest memory utilization.
+        units: '%'
+        delay: 1m
+        history: 7d
+        trends: 90d
+        params: last(//kvm.vm.cpu[{#VMUUID}])/last(//kvm.vm.vcpus[{#VMUUID}])
+        description: 'Normalized CPU utilization: 100% means all allocated vCPUs fully used. Uses the per-core CPU
+          rate divided by allocated vCPUs. Small timing offsets are possible because this is a calculated item.'
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
+      - uuid: 67f7a104ae9e478c9731f05f5f78726c
+        name: '{#VMNAME}: Allocated RAM'
+        type: DEPENDENT
+        key: kvm.vm.mem.alloc[{#VMUUID}]
+        value_type: UNSIGNED
+        history: 7d
+        trends: 90d
         preprocessing:
         - type: JSONPATH
           parameters:
-          - $.vms[?(@.uuid == "{#VM.UUID}")].guest_mem_util_pct.first()
+          - $.vms[?(@.uuid=="{#VMUUID}")].mem_alloc_bytes.first()
+        master_item:
+          key: kvm.raw
+        units: B
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
+      - uuid: 5da5b55b7b76482b8c2a8f6acdb8c93f
+        name: '{#VMNAME}: Host-resident RAM (RSS)'
+        type: DEPENDENT
+        key: kvm.vm.mem.rss[{#VMUUID}]
+        value_type: UNSIGNED
+        history: 7d
+        trends: 90d
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.vms[?(@.uuid=="{#VMUUID}")].mem_rss_bytes.first()
+        master_item:
+          key: kvm.raw
+        units: B
+        description: Hypervisor resident memory footprint, not actual guest memory used; may exceed configured guest
+          RAM due to QEMU overhead.
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
+      - uuid: 49161aef261343c382c34a9324a415da
+        name: '{#VMNAME}: Guest memory utilization (balloon estimate)'
+        type: DEPENDENT
+        key: kvm.vm.mem.guest.util[{#VMUUID}]
+        value_type: FLOAT
+        history: 7d
+        trends: 90d
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.vms[?(@.uuid=="{#VMUUID}")].guest_mem_util_pct.first()
           error_handler: DISCARD_VALUE
+        master_item:
+          key: kvm.raw
+        units: '%'
+        description: Optional libvirt balloon estimate; only when guest provides balloon statistics.
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
+      - uuid: 0f72f37790dd40f88609a4c1ccd14fe0
+        name: '{#VMNAME}: Disk read throughput'
+        type: DEPENDENT
+        key: kvm.vm.disk.read[{#VMUUID}]
+        value_type: FLOAT
+        history: 7d
+        trends: 90d
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.vms[?(@.uuid=="{#VMUUID}")].disk_read_bytes.first()
+        - type: CHANGE_PER_SECOND
         - type: IN_RANGE
           parameters:
           - '0'
-          - '100'
+          - '1000000000000'
           error_handler: DISCARD_VALUE
         master_item:
           key: kvm.raw
-      - uuid: e19b1a1bf2fb4e9b84af615cee4ba3af
-        name: "{#VM.NAME}: Disk read throughput"
-        type: DEPENDENT
-        key: kvm.vm.disk.read[{#VM.UUID}]
-        delay: '0'
-        history: 30d
-        trends: 365d
         units: Bps
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
+      - uuid: 77b2c01d467e49b9a14057497fbb8774
+        name: '{#VMNAME}: Disk write throughput'
+        type: DEPENDENT
+        key: kvm.vm.disk.write[{#VMUUID}]
         value_type: FLOAT
+        history: 7d
+        trends: 90d
         preprocessing:
         - type: JSONPATH
           parameters:
-          - $.vms[?(@.uuid == "{#VM.UUID}")].disk_read_bytes.first()
-          error_handler: DISCARD_VALUE
+          - $.vms[?(@.uuid=="{#VMUUID}")].disk_write_bytes.first()
         - type: CHANGE_PER_SECOND
+        - type: IN_RANGE
+          parameters:
+          - '0'
+          - '1000000000000'
+          error_handler: DISCARD_VALUE
         master_item:
           key: kvm.raw
-      - uuid: f74070d15dc14faa869bc7ca5ecbf6ad
-        name: "{#VM.NAME}: Disk write throughput"
-        type: DEPENDENT
-        key: kvm.vm.disk.write[{#VM.UUID}]
-        delay: '0'
-        history: 30d
-        trends: 365d
         units: Bps
-        value_type: FLOAT
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.vms[?(@.uuid == "{#VM.UUID}")].disk_write_bytes.first()
-          error_handler: DISCARD_VALUE
-        - type: CHANGE_PER_SECOND
-        master_item:
-          key: kvm.raw
-      - uuid: 9e88dd07941c41e481212c92b561db4e
-        name: "{#VM.NAME}: Network receive throughput"
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
+      - uuid: 30b571b1892f41198cfb5955ce775796
+        name: '{#VMNAME}: Network receive throughput'
         type: DEPENDENT
-        key: kvm.vm.net.rx[{#VM.UUID}]
-        delay: '0'
-        history: 30d
-        trends: 365d
-        units: bps
+        key: kvm.vm.net.rx[{#VMUUID}]
         value_type: FLOAT
+        history: 7d
+        trends: 90d
         preprocessing:
         - type: JSONPATH
           parameters:
-          - $.vms[?(@.uuid == "{#VM.UUID}")].net_rx_bytes.first()
-          error_handler: DISCARD_VALUE
+          - $.vms[?(@.uuid=="{#VMUUID}")].net_rx_bytes.first()
         - type: CHANGE_PER_SECOND
-        - type: MULTIPLIER
+        - type: IN_RANGE
           parameters:
-          - '8'
+          - '0'
+          - '1000000000000'
+          error_handler: DISCARD_VALUE
         master_item:
           key: kvm.raw
-      - uuid: 62d970aac059416986d7ef19e12d15a8
-        name: "{#VM.NAME}: Network transmit throughput"
+        units: Bps
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
+      - uuid: f30ae5f489224f268935578644cc9146
+        name: '{#VMNAME}: Network transmit throughput'
         type: DEPENDENT
-        key: kvm.vm.net.tx[{#VM.UUID}]
-        delay: '0'
-        history: 30d
-        trends: 365d
-        units: bps
+        key: kvm.vm.net.tx[{#VMUUID}]
         value_type: FLOAT
+        history: 7d
+        trends: 90d
         preprocessing:
         - type: JSONPATH
           parameters:
-          - $.vms[?(@.uuid == "{#VM.UUID}")].net_tx_bytes.first()
-          error_handler: DISCARD_VALUE
+          - $.vms[?(@.uuid=="{#VMUUID}")].net_tx_bytes.first()
         - type: CHANGE_PER_SECOND
-        - type: MULTIPLIER
+        - type: IN_RANGE
           parameters:
-          - '8'
+          - '0'
+          - '1000000000000'
+          error_handler: DISCARD_VALUE
         master_item:
           key: kvm.raw
+        units: Bps
+        tags:
+        - tag: component
+          value: vm
+        - tag: vm
+          value: '{#VMNAME}'
       trigger_prototypes:
-      - uuid: 7ce8525fff8640f284a94cad38453eb4
-        name: "{#VM.NAME}: Expected running VM is not active"
-        expression: '{$KVM.VM.EXPECT.RUNNING:"{#VM.UUID}"}=1 and count(/KVM Libvirt Monitoring/kvm.vm.state[{#VM.UUID}],#3,"ge",3)=3 and nodata(/KVM Libvirt Monitoring/kvm.vm.state[{#VM.UUID}],{$KVM.COLLECTOR.MAX.AGE})=0 and abs(last(/KVM Libvirt Monitoring/kvm.collector.timestamp)-now())<={$KVM.COLLECTOR.MAX.AGE}'
+      - uuid: aeeea717c30148948b803049b8cd139c
+        expression: min(/KVM Libvirt Monitoring/kvm.vm.cpu.normalized[{#VMUUID}],10m)>90 and last(/KVM Libvirt Monitoring/kvm.vm.state[{#VMUUID}])=1
+        name: '{#VMNAME}: CPU utilization above 90% of allocated vCPUs for 10m'
         priority: WARNING
-        description: Alerts after three consecutive paused, shutting down, shut off, crashed or suspended readings while collector data is fresh.
+        description: CPU saturation across allocated vCPUs. Does not alert on stopped VMs.
       graph_prototypes:
-      - uuid: 6ea57805775b47059f594dbc5bc9c9f4
-        name: "{#VM.NAME}: CPU utilization"
+      - uuid: f499ae564d404903aa9eba8241dda2d1
+        name: '{#VMNAME}: CPU utilization (% of allocated vCPUs)'
         graph_items:
-        - sortorder: '0'
-          color: 199C0D
+        - color: 1A7A52
           item:
             host: KVM Libvirt Monitoring
-            key: kvm.vm.cpu.util[{#VM.UUID}]
-      - uuid: 6195f985890e4064b78797779914c2ad
-        name: "{#VM.NAME}: Memory"
+            key: kvm.vm.cpu.normalized[{#VMUUID}]
+      - uuid: 7460f8901e5043098248eb9cf24952ad
+        name: '{#VMNAME}: CPU utilization (100% per core)'
         graph_items:
-        - sortorder: '0'
-          color: 199C0D
+        - color: 3C78D8
           item:
             host: KVM Libvirt Monitoring
-            key: kvm.vm.memory.allocated[{#VM.UUID}]
-        - sortorder: '1'
-          color: 2774C8
-          item:
-            host: KVM Libvirt Monitoring
-            key: kvm.vm.memory.rss[{#VM.UUID}]
-      - uuid: 0adb00a9d37a4e2693d5cecd2ad9be63
-        name: "{#VM.NAME}: Disk throughput"
+            key: kvm.vm.cpu[{#VMUUID}]
+      - uuid: 4101ac6973884d8d98a9b87c63bc00e5
+        name: '{#VMNAME}: Network throughput'
         graph_items:
-        - sortorder: '0'
-          color: 199C0D
+        - color: 1A7A52
           item:
             host: KVM Libvirt Monitoring
-            key: kvm.vm.disk.read[{#VM.UUID}]
-        - sortorder: '1'
-          color: 2774C8
+            key: kvm.vm.net.rx[{#VMUUID}]
+        - color: F39C12
           item:
             host: KVM Libvirt Monitoring
-            key: kvm.vm.disk.write[{#VM.UUID}]
-      - uuid: a88c28483c7d48c2830006f13511f67a
-        name: "{#VM.NAME}: Network throughput"
+            key: kvm.vm.net.tx[{#VMUUID}]
+          sortorder: '1'
+      - uuid: c7b7ddbba79a4ca88be54c3fc2e0deb9
+        name: '{#VMNAME}: Disk throughput'
         graph_items:
-        - sortorder: '0'
-          color: 199C0D
+        - color: 3C78D8
           item:
             host: KVM Libvirt Monitoring
-            key: kvm.vm.net.rx[{#VM.UUID}]
-        - sortorder: '1'
-          color: 2774C8
+            key: kvm.vm.disk.read[{#VMUUID}]
+        - color: D35400
           item:
             host: KVM Libvirt Monitoring
-            key: kvm.vm.net.tx[{#VM.UUID}]
-    macros:
-    - macro: "{$KVM.COLLECTOR.MAX.AGE}"
-      value: '300'
-      description: Maximum collector timestamp skew and no-data interval in seconds.
-    - macro: "{$KVM.VM.EXPECT.RUNNING}"
-      value: '0'
-      description: Set a UUID-context host macro to 1 for each VM expected to stay active.
-    valuemaps:
-    - uuid: c987da4081704bb4a0ced7b011fc2b84
-      name: Libvirt domain state
-      mappings:
-      - value: '0'
-        newvalue: No state
-      - value: '1'
-        newvalue: Running
-      - value: '2'
-        newvalue: Blocked
-      - value: '3'
-        newvalue: Paused
-      - value: '4'
-        newvalue: Shutting down
-      - value: '5'
-        newvalue: Shut off
-      - value: '6'
-        newvalue: Crashed
-      - value: '7'
-        newvalue: Suspended
+            key: kvm.vm.disk.write[{#VMUUID}]
+          sortorder: '1'
+    tags:
+    - tag: class
+      value: virtualization
+    - tag: target
+      value: kvm
